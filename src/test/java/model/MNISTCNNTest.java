@@ -4,12 +4,15 @@ import org.bytedeco.javacv.FrameFilter;
 import org.deeplearning4j.datasets.iterator.impl.MnistDataSetIterator;
 import org.junit.jupiter.api.Test;
 import org.nd4j.autodiff.samediff.SameDiff;
+import org.nd4j.autodiff.samediff.TrainingConfig;
 import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.dataset.DataSet;
 import org.nd4j.linalg.dataset.api.iterator.DataSetIterator;
+import org.nd4j.linalg.learning.config.Adam;
 
 public class MNISTCNNTest {
     @Test
-    public void simpleSubModelCreateTest() {
+    public void simpleSubModelCreateTest() throws Exception{
         MNISTCNN testModel = new MNISTCNN();
         MNISTCNN testSubModel = new MNISTCNN();
         SameDiff model = testModel.makeMNISTNet();
@@ -17,11 +20,34 @@ public class MNISTCNNTest {
         SameDiff subModel2 = testSubModel.simpleMakeSubModel(2, 3);
         SameDiff subModel3 = testSubModel.simpleMakeSubModel(4, 4);
         System.out.print("Created");
+
+        //Create and set the training configuration
+        double learningRate = 1e-3;
+        TrainingConfig config = new TrainingConfig.Builder()
+                .l2(1e-4)                               //L2 regularization
+                .updater(new Adam(learningRate))        //Adam optimizer with specified learning rate
+                .dataSetFeatureMapping("input")         //DataSet features array should be associated with variable "input"
+                .dataSetLabelMapping("label")           //DataSet label array should be associated with variable "label"
+                .build();
+
+        model.setTrainingConfig(config);
+
+        int batchSize = 32;
+        DataSetIterator trainData = new MnistDataSetIterator(batchSize, true, 12345);
+
+        while (trainData.hasNext()) {
+
+            INDArray input = trainData.next().getFeatures();
+            model.getVariable("input").setArray(input);
+            INDArray output = model.getVariable("out").eval();
+            System.out.print("HI");
+        }
     }
 
     @Test
     public void subModelFeedForwardTest() throws Exception {
         MNISTCNN testSubModel = new MNISTCNN();
+        SameDiff model = testSubModel.makeMNISTNet();
         SameDiff subModel = testSubModel.simpleMakeSubModel(0, 1);
         SameDiff subModel2 = testSubModel.simpleMakeSubModel(2, 3);
         SameDiff subModel3 = testSubModel.simpleMakeSubModel(4, 4);
@@ -29,9 +55,24 @@ public class MNISTCNNTest {
         int batchSize = 32;
         DataSetIterator trainData = new MnistDataSetIterator(batchSize, true, 12345);
 
+        //Create and set the training configuration
+        double learningRate = 1e-3;
+        TrainingConfig config = new TrainingConfig.Builder()
+                .l2(1e-4)                               //L2 regularization
+                .updater(new Adam(learningRate))        //Adam optimizer with specified learning rate
+                .dataSetFeatureMapping("input")         //DataSet features array should be associated with variable "input"
+                .dataSetLabelMapping("label")           //DataSet label array should be associated with variable "label"
+                .build();
+
+        subModel.setTrainingConfig(config);
+        subModel2.setTrainingConfig(config);
+        subModel3.setTrainingConfig(config);
         while (trainData.hasNext()) {
             // subModel 1
-            INDArray input = trainData.next().getFeatures();
+            DataSet curData = trainData.next();
+            INDArray input = curData.getFeatures();
+            INDArray label = curData.getLabels();
+
             subModel.getVariable("input").setArray(input);
             INDArray output = subModel.getVariable("output").eval();
 
@@ -40,6 +81,7 @@ public class MNISTCNNTest {
             output = subModel2.getVariable("output").eval();
 
             // subModel 3
+            subModel3.getVariable("label").setArray(label);
             subModel3.getVariable("input").setArray(output);
             output = subModel3.getVariable("loss").eval();
 

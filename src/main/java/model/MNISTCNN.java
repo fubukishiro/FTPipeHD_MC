@@ -8,7 +8,7 @@ import org.nd4j.linalg.api.ops.impl.layers.convolution.config.Pooling2DConfig;
 import org.nd4j.weightinit.impl.XavierInitScheme;
 
 public class MNISTCNN {
-    private int inputSize[][] = {{-1, 28, 28}, {-1, 26, 26, 4}, {-1, 13, 13, 4}, {-1, 11, 11, 8}, {-1, 5, 5, 8}};
+    private long inputSize[][] = {{-1, 784}, {-1, 4, 26, 26}, {-1, 4, 13, 13}, {-1, 8, 11, 11}, {-1, 8, 5, 5}};
 
     public SameDiff makeMNISTNet() {
         SameDiff sd = SameDiff.create();
@@ -75,15 +75,15 @@ public class MNISTCNN {
     public SameDiff simpleMakeSubModel(int start, int end) {
         SameDiff sd = SameDiff.create();
 
-        int[] curInput = inputSize[start];
+        long[] curInput = inputSize[start];
 
-        int nIn = -1;
-        for (int i : curInput) {
-            nIn *= i;
-        }
+//        int nIn = -1;
+//        for (int i : curInput) {
+//            nIn *= i;
+//        }
 
-        SDVariable in = sd.placeHolder("input", DataType.FLOAT, -1, nIn);
-        SDVariable inReshaped = in.reshape(curInput);
+        SDVariable inReshaped = sd.placeHolder("input", DataType.FLOAT, curInput);
+        // SDVariable inReshaped = in.reshape(curInput);
 
         Pooling2DConfig poolConfig = Pooling2DConfig.builder().kH(2).kW(2).sH(2).sW(2).build();
 
@@ -100,6 +100,7 @@ public class MNISTCNN {
                     SDVariable w0 = sd.var("w0", new XavierInitScheme('c', 28 * 28, 26 * 26 * 4), DataType.FLOAT, 3, 3, 1, 4);
                     SDVariable b0 = sd.zero("b0", 4);
 
+                    inReshaped = inReshaped.reshape(-1, 1, 28, 28);
                     inReshaped = sd.cnn().conv2d(name, inReshaped, w0, b0, convConfig);
                     break;
                 case 1:
@@ -111,7 +112,7 @@ public class MNISTCNN {
                     SDVariable w1 = sd.var("w1", new XavierInitScheme('c', 13 * 13 * 4, 11 * 11 * 8), DataType.FLOAT, 3, 3, 4, 8);
                     SDVariable b1 = sd.zero("b1", 8);
 
-                    inReshaped= sd.cnn().conv2d(name, inReshaped, w1, b1, convConfig);
+                    inReshaped = sd.cnn().conv2d(name, inReshaped, w1, b1, convConfig);
                     break;
                 case 3:
                     SDVariable pool2 = sd.cnn().maxPooling2d(inReshaped, poolConfig);
