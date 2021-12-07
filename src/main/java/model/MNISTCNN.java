@@ -2,13 +2,30 @@ package model;
 
 import org.nd4j.autodiff.samediff.SDVariable;
 import org.nd4j.autodiff.samediff.SameDiff;
+import org.nd4j.autodiff.samediff.VariableType;
+import org.nd4j.autodiff.samediff.internal.Variable;
+import org.nd4j.common.base.Preconditions;
 import org.nd4j.linalg.api.buffer.DataType;
+import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.api.ops.impl.layers.convolution.config.Conv2DConfig;
 import org.nd4j.linalg.api.ops.impl.layers.convolution.config.Pooling2DConfig;
+import org.nd4j.linalg.exception.ND4JIllegalStateException;
+import org.nd4j.linalg.factory.Nd4j;
+import org.nd4j.linalg.learning.GradientUpdater;
 import org.nd4j.weightinit.impl.XavierInitScheme;
+
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
 
 public class MNISTCNN {
     private long inputSize[][] = {{-1, 784}, {-1, 4, 26, 26}, {-1, 4, 13, 13}, {-1, 8, 11, 11}, {-1, 8, 5, 5}};
+    private SameDiff model;
+    private SameDiff subModel;
+    private Map<String, GradientUpdater> updaterMap;
+    private int iteration = 0;
+    private int epoch = 0;
 
     public SameDiff makeMNISTNet() {
         SameDiff sd = SameDiff.create();
@@ -63,6 +80,7 @@ public class MNISTCNN {
 
         sd.setLossVariables(loss);
 
+        this.model = sd;
         return sd;
     }
 
@@ -82,7 +100,10 @@ public class MNISTCNN {
 //            nIn *= i;
 //        }
 
-        SDVariable inReshaped = sd.placeHolder("input", DataType.FLOAT, curInput);
+
+        //SDVariable inReshaped = sd.placeHolder("input", DataType.FLOAT, curInput);
+        SDVariable inReshaped = sd.var("input", DataType.FLOAT, curInput);
+
         // SDVariable inReshaped = in.reshape(curInput);
 
         Pooling2DConfig poolConfig = Pooling2DConfig.builder().kH(2).kW(2).sH(2).sW(2).build();
@@ -100,7 +121,8 @@ public class MNISTCNN {
                     SDVariable w0 = sd.var("w0", new XavierInitScheme('c', 28 * 28, 26 * 26 * 4), DataType.FLOAT, 3, 3, 1, 4);
                     SDVariable b0 = sd.zero("b0", 4);
 
-                    inReshaped = inReshaped.reshape(-1, 1, 28, 28);
+                    inReshaped = sd.reshape("reshapedInput", inReshaped, -1, 1, 28, 28);
+                    // inReshaped = inReshaped.reshape(-1, 1, 28, 28);
                     inReshaped = sd.cnn().conv2d(name, inReshaped, w0, b0, convConfig);
                     break;
                 case 1:
@@ -125,7 +147,8 @@ public class MNISTCNN {
                     SDVariable wOut = sd.var("wOut", new XavierInitScheme('c', 5 * 5 * 8, 10), DataType.FLOAT, 5 * 5 * 8, 10);
                     SDVariable bOut = sd.zero("bOut", 10);
 
-                    inReshaped = inReshaped.reshape(-1, 5 * 5 * 8);
+                    inReshaped = sd.reshape("reshapedInput", inReshaped, -1, 5 * 5 * 8);
+                    //inReshaped = inReshaped.reshape(-1, 5 * 5 * 8);
                     SDVariable z = sd.nn().linear("z", inReshaped, wOut, bOut);
 
                     // softmax crossentropy loss function
@@ -138,6 +161,68 @@ public class MNISTCNN {
                     System.out.print("Unknown layer: " + i);
             }
         }
+        this.subModel = sd;
         return sd;
+    }
+
+    /**
+     * An external initialize training method extracted from the source code, in which it is a protected method,
+     * it initializes the updater and return an updater map of trainable variables
+     * return Map<String, GradientUpdater>
+     */
+    public Map<String, GradientUpdater> externalInitializeTraining() {
+        SameDiff sd = this.subModel;
+        if (!sd.isInitializedTraining()) {
+            if (sd.getTrainingConfig() == null) {
+                throw new ND4JIllegalStateException("No training config specified!");
+            }
+
+            updaterMap = new HashMap<String, GradientUpdater>();
+            for (Variable v : sd.getVariables().values()) {
+                if (v.getVariable().getVariableType() != VariableType.VARIABLE || !v.getVariable().dataType().isFPType()) {
+                    //Skip non-trainable parameters
+                    continue;
+                }
+
+                INDArray arr = v.getVariable().getArr();
+                long stateSize = sd.getTrainingConfig().getUpdater().stateSize(arr.length());
+                INDArray view = stateSize == 0 ? null : Nd4j.createUninitialized(arr.dataType(), 1, stateSize);
+                GradientUpdater gu = sd.getTrainingConfig().getUpdater().instantiate(view, false);
+                gu.setStateViewArray(view, arr.shape(), arr.ordering(), true);
+                updaterMap.put(v.getName(), gu);
+            }
+            return updaterMap;
+        }
+        return null;
+    }
+
+    /**
+     * Similar to the step() in Pytorch, which updates the weights according to the gradient
+     */
+    public void step() {
+        Set<String> paramsToTrain = new LinkedHashSet<String>();
+        Map<String, String> gradVarToVarMap = new HashMap<String, String>(); // 梯度变量和变量名字之间的映射
+        for (Variable v : subModel.getVariables().values()) {
+            if (v.getVariable().getVariableType() == VariableType.VARIABLE) {
+                paramsToTrain.add(v.getName());
+            }
+        }
+        // TODO: TrainingSession 里面的 reg 相关的代码要不要加
+        for (String s : paramsToTrain) {
+            SDVariable grad = this.subModel.getVariable(s).getGradient();
+            INDArray paramArr = this.subModel.getVariable(s).getArr();
+            INDArray gradArr = grad.getArr();
+            if (grad == null) {
+                continue;
+            }
+            GradientUpdater u = updaterMap.get(s);
+            u.applyUpdater(gradArr, this.iteration, this.epoch); // in-place update
+
+            if (this.subModel.getTrainingConfig().isMinimize()) {
+                paramArr.subi(gradArr);
+            } else {
+                paramArr.addi(gradArr);
+            }
+        }
     }
 }
