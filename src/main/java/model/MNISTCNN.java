@@ -85,7 +85,7 @@ public class MNISTCNN {
     }
 
     /**
-     * This is a simple construction of sub model to test the feasibility of the Java NN
+     * Given the start layer and the end layer, construct the sub-model of the MNISTCNN
      * @param start
      * @param end
      * @return
@@ -101,8 +101,8 @@ public class MNISTCNN {
 //        }
 
 
-        //SDVariable inReshaped = sd.placeHolder("input", DataType.FLOAT, curInput);
-        SDVariable inReshaped = sd.var("input", DataType.FLOAT, curInput);
+        SDVariable inReshaped = sd.placeHolder("input", DataType.FLOAT, curInput);
+        //SDVariable inReshaped = sd.var("input", DataType.FLOAT, curInput);
 
         // SDVariable inReshaped = in.reshape(curInput);
 
@@ -201,13 +201,15 @@ public class MNISTCNN {
      */
     public void step() {
         Set<String> paramsToTrain = new LinkedHashSet<String>();
-        Map<String, String> gradVarToVarMap = new HashMap<String, String>(); // 梯度变量和变量名字之间的映射
+        Map<String, String> gradVarToVarMap = new HashMap<String, String>(); // map between gradient variables name and variable name
+        
+        // find the variable needed to update
         for (Variable v : subModel.getVariables().values()) {
             if (v.getVariable().getVariableType() == VariableType.VARIABLE) {
                 paramsToTrain.add(v.getName());
             }
         }
-        // TODO: TrainingSession 里面的 reg 相关的代码要不要加
+        // TODO: TrainingSession reg? 
         for (String s : paramsToTrain) {
             SDVariable grad = this.subModel.getVariable(s).getGradient();
             INDArray paramArr = this.subModel.getVariable(s).getArr();

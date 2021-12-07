@@ -56,6 +56,8 @@ public class MNISTCNNTest {
         MNISTCNN testSubModel2 = new MNISTCNN();
         MNISTCNN testSubModel3 = new MNISTCNN();
         SameDiff model = testSubModel.makeMNISTNet();
+
+        // Split a five-layer CNN model into three sub-models
         SameDiff subModel = testSubModel.simpleMakeSubModel(0, 1);
         SameDiff subModel2 = testSubModel2.simpleMakeSubModel(2, 3);
         SameDiff subModel3 = testSubModel3.simpleMakeSubModel(4, 4);
@@ -84,45 +86,42 @@ public class MNISTCNNTest {
         Map<String, GradientUpdater> gu2 = testSubModel2.externalInitializeTraining();
         Map<String, GradientUpdater> gu3 = testSubModel3.externalInitializeTraining();
 
-
+        // I want to train these three sub-models in a consecutive order
+        // I want to forward the subModel, subModel2 and subModel3 sequentially and then backward them in a reverse order
         while (trainData.hasNext()) {
-            // subModel 1
             DataSet curData = trainData.next();
             INDArray input = curData.getFeatures();
             INDArray label = curData.getLabels();
 
+            // subModel forward
             subModel.getVariable("input").setArray(input);
             INDArray output = subModel.getVariable("output").eval();
 
-            // subModel 2
+            // subModel2 forward
             subModel2.getVariable("input").setArray(output);
             output = subModel2.getVariable("output").eval();
 
-            // subModel 3
+            // subModel3 forward
             subModel3.getVariable("label").setArray(label);
             subModel3.getVariable("input").setArray(output);
             output = subModel3.getVariable("loss").eval();
 
-            System.out.print("HI");
-
-            // backward test
+            // subModel3 backward
             Map<String, INDArray> grads3 = subModel3.calculateGradients(null, subModel3.getVariables().keySet());
             testSubModel3.step();
 
+            // subModel2 backward
             ExternalErrorsFunction fn = SameDiffUtils.externalErrors(subModel2, null, subModel2.getVariable("output"));
             INDArray externalGrad = grads3.get("reshapedInput").reshape(-1, 8, 5, 5);
             Map<String, INDArray> externalGradMap = new HashMap<String, INDArray>();
             externalGradMap.put("output-grad", externalGrad);
-            Map<String, INDArray> grad2 = subModel2.calculateGradients(externalGradMap, subModel2.getVariables().keySet());
+            Map<String, INDArray> grad2 = subModel2.calculateGradients(externalGradMap, subModel2.getVariables().keySet()); // TODO: error occured here
 
 
             Map<String, INDArray> grad = subModel.calculateGradients(null, subModel.getVariables().keySet());
 
-
-            System.out.print("HI");
-
             testSubModel.step();
-            System.out.print("HI");
+            
         }
     }
 
@@ -154,6 +153,5 @@ public class MNISTCNNTest {
         Map<String, GradientUpdater> gu2 = testSubModel2.externalInitializeTraining();
         Map<String, GradientUpdater> gu3 = testSubModel3.externalInitializeTraining();
 
-        System.out.print("HI");
     }
 }
